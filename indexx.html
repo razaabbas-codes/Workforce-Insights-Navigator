@@ -1,0 +1,1025 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HR Analytics Dashboard</title>
+    <!-- Load D3 for data processing and SVG visualization -->
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Lexend:wght@300;400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;600&display=swap');
+
+        :root {
+            --bg-color: #0d1117;
+            --primary-text-color: #c9d1d9;
+            --heading-color: #ffffff;
+            --secondary-text-color: #8b949e;
+
+            /* Professional Mint/Sage Palette */
+            --data-main: #61C5B5;      /* Primary Data */
+            --data-secondary: #008779; /* Secondary Data */
+            --data-tertiary: #A7DFD7;  /* Light Background/Trend */
+            
+            /* Gender Specific Colors */
+            --male-color: #3b82f6;      /* Blue */
+            --female-color: #ec4899;    /* Pink */
+
+            --positive-trend-color: var(--data-main);
+            --negative-trend-color: #d85c5c; /* Soft Red */
+
+            --card-bg: #161b22;
+            --border-color: #30363d;
+        }
+
+        body {
+            font-family: 'Lexend', sans-serif;
+            margin: 0;
+            background-color: var(--bg-color);
+            color: var(--primary-text-color);
+            overflow: hidden; /* Prevent body scroll */
+        }
+
+        .main-container {
+            max-width: 1400px;
+            margin: 1.5rem auto;
+            padding: 0 1.5rem;
+            height: calc(100vh - 3rem);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 2rem;
+            flex-shrink: 0;
+            position: relative; /* Needed for absolute positioning of time */
+        }
+
+        .header h1 {
+            color: var(--heading-color);
+            font-family: 'Source Serif 4', serif;
+            font-weight: 600;
+            font-size: clamp(1.5rem, 4vw, 2.2rem);
+            margin-bottom: 0.5rem;
+        }
+        
+        /* New Styles for Live Time Display */
+        .live-time-display {
+            position: absolute;
+            top: 0;
+            right: 0;
+            text-align: right;
+            font-size: 0.9rem;
+            color: var(--secondary-text-color);
+            line-height: 1.4;
+        }
+        
+        .story-scroller {
+            display: flex;
+            overflow-x: auto;
+            scroll-snap-type: x mandatory;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: none;
+            flex-grow: 1;
+        }
+        .story-scroller::-webkit-scrollbar { display: none; }
+
+        .story-slide {
+            flex: 0 0 100%;
+            scroll-snap-align: start;
+            display: grid;
+            grid-template-columns: 1fr 2.5fr;
+            gap: 2rem;
+            align-items: center;
+            padding-right: 2rem;
+            box-sizing: border-box;
+        }
+        
+        @media (max-width: 1024px) {
+            .story-slide {
+                grid-template-columns: 1fr;
+                grid-template-rows: auto 1fr;
+                padding-right: 0;
+            }
+            .explanation-panel { padding-right: 0; }
+        }
+        
+        @media (max-width: 640px) {
+            .live-time-display {
+                position: static;
+                text-align: center;
+                margin-top: 10px;
+            }
+            .header {
+                margin-bottom: 1.5rem;
+            }
+        }
+
+
+        .explanation-panel {
+            padding-right: 1.5rem;
+        }
+
+        .explanation-panel h2 {
+            font-family: 'Source Serif 4', serif;
+            color: var(--heading-color);
+            font-size: 1.75rem;
+            font-weight: 600;
+            margin-top: 0;
+            line-height: 1.2;
+        }
+
+        .explanation-panel p {
+            font-size: 0.95rem;
+            line-height: 1.6;
+            color: var(--secondary-text-color);
+        }
+
+        .chart-container {
+            background: var(--card-bg);
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+            border: 1px solid var(--border-color);
+            padding: 1rem;
+            height: 550px; 
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+        
+        .chart-canvas-wrapper {
+            width: 100%;
+            flex-grow: 1; 
+            min-height: 250px;
+            position: relative;
+        }
+        
+        /* D3/SVG Styles */
+        .chart-svg {
+            display: block;
+            margin: 0 auto;
+        }
+
+        .axis text {
+            fill: var(--secondary-text-color);
+            font-size: 0.75rem;
+        }
+        
+        .axis line, .axis path {
+            stroke: var(--border-color);
+            shape-rendering: crispEdges;
+        }
+        
+        .bar {
+            fill: var(--data-main);
+            transition: fill 0.2s;
+        }
+        
+        .bar:hover {
+            fill: var(--data-secondary);
+        }
+
+        /* Tooltip/Hover Label */
+        .chart-tooltip {
+            position: absolute;
+            background: var(--data-main);
+            color: var(--bg-color);
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 0.9rem;
+            font-weight: 500;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.2s;
+            z-index: 100;
+            text-align: center;
+        }
+
+        /* Navigation */
+        .navigation-controls {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 1rem;
+            margin-top: 1.5rem;
+            flex-shrink: 0;
+        }
+
+        .nav-dots { display: flex; gap: 0.75rem; }
+
+        .nav-dot {
+            width: 12px; height: 12px;
+            background-color: var(--border-color);
+            border-radius: 50%;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .nav-dot.active {
+            background-color: var(--data-main);
+            transform: scale(1.2);
+        }
+
+        /* KPI Grid Styles */
+        .dashboard-grid { 
+            display: grid; 
+            grid-template-columns: repeat(4, 1fr); 
+            gap: 20px; 
+            width: 100%; 
+            padding: 10px;
+            flex-shrink: 0;
+            margin-bottom: 20px;
+        }
+        
+        /* KPI-specific sizing for the first slide */
+        #chart-wrapper-exec-hr {
+            height: 200px;
+            min-height: 200px;
+            margin-top: 10px;
+        }
+
+        @media (max-width: 768px) {
+            .dashboard-grid { grid-template-columns: 1fr 1fr; }
+        }
+
+        .kpi-tile { 
+            background-color: var(--bg-color); 
+            border-radius: 6px; 
+            padding: 20px; 
+            display: flex; 
+            flex-direction: column; 
+            justify-content: space-between; 
+            border: 1px solid var(--border-color); 
+            transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); 
+        }
+        .kpi-tile:hover { 
+            transform: translateY(-3px); 
+            border-color: var(--data-main); 
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3); 
+        }
+        .kpi-title { font-size: 0.9rem; color: var(--secondary-text-color); margin: 0; font-weight: 400; }
+        .kpi-value { font-size: 2rem; font-weight: 600; color: var(--heading-color); margin: 10px 0; line-height: 1; }
+        .kpi-separator { width: 100%; height: 1px; background-color: var(--border-color); margin: 10px 0; }
+        .kpi-trend { font-size: 0.9rem; font-weight: 500; }
+        .kpi-trend.positive { color: var(--positive-trend-color); }
+        .kpi-trend.negative { color: var(--negative-trend-color); }
+        
+        /* Table Styles (Used only for the final slide's dedicated table) */
+        .table-container {
+            width: 100%;
+            max-height: 520px; 
+            overflow-y: auto;
+            background: var(--card-bg); 
+            padding: 0;
+            flex-grow: 1; /* Allows it to fill the chart container */
+        }
+        .table-container table {
+            width: 100%;
+            border-collapse: collapse;
+            background-color: var(--card-bg);
+        }
+
+        .table-container th, .table-container td {
+            padding: 10px 15px;
+            text-align: left;
+        }
+
+        .table-container th {
+            text-transform: uppercase;
+            font-size: 0.8rem;
+            color: var(--secondary-text-color);
+            background-color: #0d1117; 
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            border-bottom: 2px solid var(--border-color);
+            cursor: pointer;
+        }
+        
+        .table-container th:hover {
+            color: var(--heading-color);
+        }
+
+        .table-container tr {
+             border-bottom: 1px solid var(--border-color);
+        }
+        
+        .table-container tr:last-child {
+            border-bottom: none;
+        }
+        
+        /* Color coding for Status */
+        .status-active { color: var(--data-main); }
+        .status-on-hold { color: #f59e0b; } /* Warning/Yellow */
+        .status-completed { color: #34d399; } /* Green */
+        .status-pending-renewal { color: #f472b6; } /* Pink/Urgent */
+
+    </style>
+</head>
+<body>
+
+    <div class="main-container">
+        <header class="header">
+            <!-- LIVE TIME DISPLAY -->
+            <div class="live-time-display">
+                <div id="current-date"></div>
+                <div id="current-time"></div>
+            </div>
+            
+            <h1>HR Analytics Dashboard</h1>
+            <p class="attribution" style="color: var(--secondary-text-color); font-size: 1rem;">created by Raza Abbas</p>
+        </header>
+
+        <div class="story-scroller" id="story-scroller">
+            <!-- Slides will be injected here by JavaScript -->
+        </div>
+        
+        <div class="navigation-controls">
+            <div class="nav-dots" id="nav-dots"></div>
+        </div>
+    </div>
+
+    <div class="chart-tooltip" id="chart-tooltip"></div>
+
+    <script>
+    
+    // --- LIVE TIME FUNCTIONALITY ---
+    function updateLiveTime() {
+        const now = new Date();
+        
+        const dateOptions = { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' };
+        const timeOptions = { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true };
+
+        document.getElementById('current-date').textContent = now.toLocaleDateString('en-US', dateOptions);
+        document.getElementById('current-time').textContent = now.toLocaleTimeString('en-US', timeOptions);
+    }
+    
+    // Update immediately and then every second
+    updateLiveTime();
+    setInterval(updateLiveTime, 1000);
+    
+    // --- DASHBOARD START ---
+    document.addEventListener('DOMContentLoaded', () => {
+        const random = (min, max) => Math.random() * (max - min) + min;
+        const randomInt = (min, max) => Math.floor(random(min, max + 1));
+        const formatNumber = d3.format(",");
+        const tooltip = d3.select("#chart-tooltip");
+
+        // --- HR EMPLOYEE DATA SIMULATION ---
+        const totalEmployees = 100;
+        let employeeData = [];
+
+        // Fixed Gender Distribution (60 Male, 40 Female)
+        for (let i = 0; i < 60; i++) {
+            employeeData.push({ Gender: "Male" });
+        }
+        for (let i = 0; i < 40; i++) {
+            employeeData.push({ Gender: "Female" });
+        }
+        
+        employeeData.sort(() => Math.random() - 0.5);
+
+        // Assign details
+        employeeData = employeeData.map((d, i) => {
+            // Location Assignment (Bangalore highest)
+            let location;
+            if (i < 45) { location = "Bangalore"; } // 45%
+            else if (i < 65) { location = "Pune"; }    // 20%
+            else if (i < 75) { location = "Kerala"; }  // 10%
+            else if (i < 85) { location = "Kashmir"; } // 10%
+            else { location = "Others"; }              // 15%
+            
+            // Department Assignment (Engineering highest)
+            let department;
+            if (i < 40) { department = "Engineering"; } // 40%
+            else if (i < 60) { department = "Project Management"; } // 20%
+            else if (i < 75) { department = "Others"; } // 15%
+            else if (i < 88) { department = "Human Resources"; } // 13%
+            else { department = "Finance"; } // 12%
+            
+            // Work Mode Assignment (40% Remote, 30% Office, 30% Hybrid)
+            let workMode;
+            if (i < 40) { workMode = "Remote"; } 
+            else if (i < 70) { workMode = "Office (5 Days)"; } 
+            else { workMode = "Hybrid (3 Days)"; }
+
+            // Joiners (5 new joiners this month)
+            let joinYear, joinMonth;
+            if (i < 5) { 
+                joinYear = 2024;
+                joinMonth = 10; // Latest month (October)
+            } else {
+                joinYear = randomInt(2021, 2024);
+                joinMonth = randomInt(1, 9); 
+            }
+            const joinDate = new Date(joinYear, joinMonth - 1, randomInt(1, 28));
+
+            return {
+                EmployeeID: `E${1000 + i}`,
+                Age: randomInt(25, 55),
+                Gender: d.Gender,
+                Department: department,
+                Location: location,
+                WorkMode: workMode,
+                JoinYear: joinYear,
+                JoinMonth: joinMonth,
+                JoinDate: joinDate,
+            };
+        });
+        
+        // --- CLIENT/MANAGER DATA SIMULATION (NEW) ---
+        const managerDetailsData = Array.from({ length: 15 }, (_, i) => {
+            const clientNames = ['Acme Corp', 'Innovate Tech', 'Global Dynamics', 'SecureNet', 'Future Mobility', 'Pinnacle Group', 'Aurora Ltd', 'Zenith Sol', 'Maximus Inc'];
+            const projectManagers = ['Alice Johnson', 'Bob Smith', 'Charlie Brown', 'Diana Prince', 'Evan Davis', 'Fiona Green', 'Gary Hall'];
+            const departments = ['Engineering', 'Project Management', 'Finance', 'Strategy', 'Client Services'];
+            const statuses = ['Active', 'On Hold', 'Pending Renewal', 'Completed'];
+            
+            // Simulate data
+            const clientSinceYear = randomInt(2020, 2024);
+            const contractValue = random(250000, 7500000);
+            const status = statuses[randomInt(0, statuses.length - 1)];
+
+            return {
+                ClientID: `CL-${100 + i}`,
+                ClientName: clientNames[randomInt(0, clientNames.length - 1)] + (i > 5 ? ` (${i})` : ''),
+                ProjectManager: projectManagers[randomInt(0, projectManagers.length - 1)],
+                Dept: departments[randomInt(0, departments.length - 1)],
+                ClientSince: clientSinceYear,
+                ContractValue: contractValue,
+                Status: status
+            };
+        });
+        
+        // --- GLOBAL CALCULATIONS ---
+        const ageSum = employeeData.reduce((sum, d) => sum + d.Age, 0);
+        const avgAge = (ageSum / totalEmployees).toFixed(1);
+        const genderCounts = d3.rollup(employeeData, v => v.length, d => d.Gender);
+        const totalMale = genderCounts.get('Male') || 0;
+        const totalFemale = genderCounts.get('Female') || 0;
+        const attritionRate = 2.5; // Fixed as requested
+
+        
+        // --- CORE SCROLLYTELLING SETUP ---
+        const storySteps = [
+            { id: "exec-hr", title: "Executive HR Overview & Key Metrics", text: "A high-level summary of the workforce composition, including average age, attrition, and total headcount. The KPI cards show key instantaneous metrics.", drawChart: drawDashboardSummary2D, dataKey: 'employeeData' },
+            { id: "proj-dist", title: "Employee Distribution by Department", text: "Visualize resource allocation across key functional departments/projects. The highest bar indicates the most resource-intensive area.", drawChart: drawProjectDistribution2D, dataKey: 'employeeData' },
+            { id: "location-dist", title: "Geographic Workforce Distribution", text: "Visualize employee density across different office locations. Bangalore has the highest count, as requested.", drawChart: drawLocationDistribution2D, dataKey: 'employeeData' },
+            { id: "workmode-perf", title: "Work Mode Percentage Breakdown", text: "A donut chart showing the percentage breakdown of work arrangements: Remote, Hybrid, and Office. Critical for facilities planning.", drawChart: drawWorkModePie2D, dataKey: 'employeeData' },
+            { id: "joiners-rate", title: "New Joiners Per Month", text: "Track the rate of new employee integration over time. The recent spike (far right) shows the 5 new joiners this month.", drawChart: drawNewJoiners2D, dataKey: 'employeeData' },
+            { id: "client-manager", title: "Client & Project Manager Details", text: "A sortable table tracking key client relationships, responsible managers, and contract status. Click on any column header to sort.", drawChart: drawManagerDetailsTable, dataKey: 'managerDetailsData' }
+        ];
+
+        let currentStepIndex = 0;
+        const storyScroller = d3.select("#story-scroller");
+        const navDotsContainer = d3.select("#nav-dots");
+        let activeSceneCleanup = null; // For holding cleanup functions
+
+        /**
+         * Renders the KPI cards for the executive summary view.
+         */
+        function renderKpiCards() {
+             const trendData = [
+                { title: 'Total Employees', value: totalEmployees, trend: 5, trendDir: 'positive', format: formatNumber },
+                { title: 'Average Age', value: avgAge, trend: -0.2, trendDir: 'negative', format: d3.format(",.1f"), unit: ' yrs' },
+                { title: 'Attrition Rate', value: attritionRate, trend: 0.1, trendDir: 'positive', format: d3.format(",.1f"), unit: '%' },
+                { title: 'Gender (M/F)', value: `${totalMale}/${totalFemale}`, trend: 0, trendDir: 'neutral', format: (d) => d }
+            ];
+            
+            return `
+                <div class="dashboard-grid">
+                    ${trendData.map(d => `
+                        <div class="kpi-tile">
+                            <div><h3 class="kpi-title">${d.title}</h3></div>
+                            <div><p class="kpi-value" style="color:${d.title === 'Attrition Rate' ? 'var(--negative-trend-color)' : 'var(--heading-color)'}">${d.format(d.value)}${d.unit || ''}</p></div>
+                            <div>
+                                <div class="kpi-separator"></div>
+                                <p class="kpi-trend ${d.trendDir}">${d.trend !== 0 ? (d.trend > 0 ? '▲' : '▼') : '—'} ${Math.abs(d.trend)}${d.unit === '%' ? '%' : (d.trend !== 0 && d.title !== 'Average Age' ? '' : '')} vs Last Qtr</p>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        /**
+         * Cleans up the previous chart.
+         */
+        function cleanupChart() {
+            if (activeSceneCleanup) {
+                activeSceneCleanup();
+                activeSceneCleanup = null;
+            }
+            d3.select("#chart-tooltip").style("opacity", 0); // Hide tooltip globally
+        }
+        
+        /**
+         * Updates the content and draws the 2D chart for the active slide.
+         */
+        function updateSlideContent(index) {
+            cleanupChart(); // Clean up the previous chart
+
+            const step = storySteps[index];
+            const slide = d3.select(`#slide-${step.id}`);
+            
+            // Get the appropriate data for the step
+            const dataToUse = step.dataKey === 'employeeData' ? employeeData : managerDetailsData;
+
+            slide.select(".story-title").text(step.title);
+            slide.select(".story-text").text(step.text);
+
+            const chartParent = slide.select(".chart-container");
+            
+            // Rebuild the chart container content for the current slide
+            let chartContainerHtml = '';
+            
+            // If it's the HR executive summary (KPIs + small chart)
+            if (step.id === "exec-hr") {
+                chartContainerHtml = renderKpiCards() + 
+                    `<div class="chart-canvas-wrapper" id="chart-wrapper-exec-hr"></div>`;
+            } 
+            // If it's the Table (Slide 6)
+            else if (step.id === "client-manager") {
+                 chartContainerHtml = `<div class="chart-canvas-wrapper" id="chart-wrapper-${step.id}"></div>`;
+            }
+            // Standard chart slide structure: Only the Chart area
+            else {
+                chartContainerHtml = 
+                    `<div class="chart-canvas-wrapper" id="chart-wrapper-${step.id}"></div>`;
+            }
+            
+            chartParent.html(chartContainerHtml);
+            
+            const chartWrapper = d3.select(`#chart-wrapper-${step.id}`);
+            
+            // Draw the chart/table and get the scene cleanup function
+            activeSceneCleanup = step.drawChart(chartWrapper, dataToUse);
+        }
+        
+        function scrollToSlide(index, behavior = 'smooth') {
+            const scrollerNode = storyScroller.node();
+            const slideWidth = scrollerNode.getBoundingClientRect().width;
+            scrollerNode.scrollTo({ left: index * slideWidth, behavior: behavior });
+        }
+        
+        function updateActiveState(index) {
+            if (index !== currentStepIndex) {
+                 currentStepIndex = index;
+            }
+            updateSlideContent(index); 
+            navDotsContainer.selectAll('.nav-dot')
+                .classed('active', (d, i) => i === index);
+        }
+        
+        // --- D3 CHART IMPLEMENTATIONS (2D) ---
+        
+        /**
+         * Generic D3 Bar Chart Function.
+         */
+        function drawBarChart2D(container, data, xKey, yKey, titleKey, colorMap = {}) {
+            const margin = { top: 20, right: 20, bottom: 80, left: 50 }; // Increased bottom for labels
+            const parentWidth = container.node().getBoundingClientRect().width;
+            const parentHeight = container.node().getBoundingClientRect().height;
+            const width = parentWidth - margin.left - margin.right;
+            const height = parentHeight - margin.top - margin.bottom;
+
+            if (width <= 0 || height <= 0) return () => {}; 
+            
+            // Clear existing SVG
+            container.select("svg").remove();
+
+            const svg = container.append("svg")
+                .attr("width", parentWidth)
+                .attr("height", parentHeight)
+                .attr("class", "chart-svg")
+                .append("g")
+                .attr("transform", `translate(${margin.left},${margin.top})`);
+
+            const xDomain = data.map(d => d[xKey]);
+            const yMax = d3.max(data, d => d[yKey]);
+
+            const xScale = d3.scaleBand()
+                .domain(xDomain)
+                .range([0, width])
+                .padding(0.2);
+
+            const yScale = d3.scaleLinear()
+                .domain([0, yMax + yMax * 0.1])
+                .range([height, 0]);
+
+            // Draw Bars
+            svg.selectAll(".bar")
+                .data(data)
+                .join("rect")
+                .attr("class", "bar")
+                .attr("x", d => xScale(d[xKey]))
+                .attr("y", height) // Start from bottom for animation
+                .attr("width", xScale.bandwidth())
+                .attr("height", 0) // Start height at zero for animation
+                .attr("fill", d => colorMap[d[xKey]] || 'var(--data-main)')
+                .on("mouseover", (event, d) => {
+                    d3.select(event.currentTarget).attr("fill", 'var(--data-secondary)');
+                    tooltip.style("opacity", 1)
+                        .html(`<strong>${d[titleKey]}</strong>: ${d[yKey]} Employees`)
+                        .style("left", `${event.pageX + 10}px`)
+                        .style("top", `${event.pageY - 28}px`);
+                })
+                .on("mousemove", (event) => {
+                    tooltip.style("left", `${event.pageX + 10}px`)
+                        .style("top", `${event.pageY - 28}px`);
+                })
+                .on("mouseout", (event, d) => {
+                    d3.select(event.currentTarget).attr("fill", colorMap[d[xKey]] || 'var(--data-main)');
+                    tooltip.style("opacity", 0);
+                })
+                .transition()
+                .duration(800)
+                .attr("y", d => yScale(d[yKey]))
+                .attr("height", d => height - yScale(d[yKey]));
+
+            // Draw Axes
+            const xAxis = d3.axisBottom(xScale);
+            const yAxis = d3.axisLeft(yScale).tickFormat(d3.format("d"));
+
+            svg.append("g")
+                .attr("class", "axis x-axis")
+                .attr("transform", `translate(0,${height})`)
+                .call(xAxis)
+                .selectAll("text")
+                .attr("transform", "rotate(-45)")
+                .style("text-anchor", "end");
+
+            svg.append("g")
+                .attr("class", "axis y-axis")
+                .call(yAxis);
+            
+            return () => { container.select("svg").remove(); }; // Cleanup function
+        }
+
+        // Slide 1: Executive HR Overview (Small Bar Chart for Joiners)
+        function drawDashboardSummary2D(container, data) {
+             const chartWrapper = container; 
+             
+             // Prepare monthly joiners data (simplified, just for visual context)
+             const monthlyCounts = d3.rollup(data, v => v.length, 
+                d => d3.timeFormat("%Y-%m")(d.JoinDate) 
+             );
+             
+             // Get the last 5 months
+             const sortedMonths = Array.from(monthlyCounts.keys()).sort();
+             const recentMonths = sortedMonths.slice(-5);
+             
+             const recentData = recentMonths.map(month => ({
+                 month: month,
+                 count: monthlyCounts.get(month) || 0
+             }));
+
+             return drawBarChart2D(chartWrapper, recentData, 'month', 'count', 'month', {});
+        }
+
+        // Slide 2: Employee Distribution by Department
+        function drawProjectDistribution2D(container, data) {
+            const deptCounts = Array.from(d3.rollup(data, v => v.length, d => d.Department), ([department, count]) => ({ department, count }))
+                                    .sort((a, b) => b.count - a.count);
+
+            const colorMap = {
+                "Engineering": 'var(--male-color)', 
+                "Project Management": 'var(--female-color)',
+                "Human Resources": 'var(--data-secondary)',
+                "Finance": '#f59e0b',
+                "Others": '#94a3b8'
+            };
+            
+            return drawBarChart2D(container, deptCounts, 'department', 'count', 'department', colorMap);
+        }
+        
+        // Slide 3: Geographic Workforce Distribution
+        function drawLocationDistribution2D(container, data) {
+            const locationCounts = Array.from(d3.rollup(data, v => v.length, d => d.Location), ([location, count]) => ({ location, count }))
+                                    .sort((a, b) => b.count - a.count);
+
+            const colorMap = {
+                "Bangalore": 'var(--data-main)', // Highest count - primary color
+                "Pune": 'var(--data-secondary)',
+                "Kerala": '#A7DFD7',
+                "Kashmir": '#3b82f6',
+                "Others": '#94a3b8'
+            };
+            
+            return drawBarChart2D(container, locationCounts, 'location', 'count', 'location', colorMap);
+        }
+
+        // Slide 4: Work Mode Percentage Breakdown (Pie/Donut Chart)
+        function drawWorkModePie2D(container, data) {
+            const workModeCounts = Array.from(d3.rollup(data, v => v.length, d => d.WorkMode), ([workMode, count]) => ({ workMode, count }));
+            
+            const parentWidth = container.node().getBoundingClientRect().width;
+            const parentHeight = container.node().getBoundingClientRect().height;
+            const radius = Math.min(parentWidth, parentHeight) / 2 * 0.8;
+            
+            if (radius <= 0) return () => {};
+            
+            // Clear existing SVG
+            container.select("svg").remove();
+
+            const svg = container.append("svg")
+                .attr("width", parentWidth)
+                .attr("height", parentHeight)
+                .attr("class", "chart-svg")
+                .append("g")
+                .attr("transform", `translate(${parentWidth / 2},${parentHeight / 2})`);
+
+            const color = d3.scaleOrdinal()
+                .domain(workModeCounts.map(d => d.workMode))
+                .range(['var(--data-main)', 'var(--male-color)', 'var(--female-color)']);
+
+            const pie = d3.pie().value(d => d.count);
+            const arc = d3.arc().innerRadius(radius * 0.6).outerRadius(radius);
+            const outerArc = d3.arc().innerRadius(radius * 0.9).outerRadius(radius * 0.9);
+
+            // Draw Slices
+            const slices = svg.selectAll("path")
+                .data(pie(workModeCounts))
+                .join("path")
+                .attr("d", arc)
+                .attr("fill", d => color(d.data.workMode))
+                .attr("stroke", 'var(--card-bg)')
+                .style("stroke-width", "2px")
+                .style("opacity", 0.9)
+                .on("mouseover", (event, d) => {
+                    d3.select(event.currentTarget).style("opacity", 1).style("stroke-width", "4px");
+                    tooltip.style("opacity", 1)
+                        .html(`<strong>${d.data.workMode}</strong>: ${d.data.count} (${(d.data.count / totalEmployees * 100).toFixed(1)}%)`)
+                        .style("left", `${event.pageX + 10}px`)
+                        .style("top", `${event.pageY - 28}px`);
+                })
+                .on("mousemove", (event) => {
+                    tooltip.style("left", `${event.pageX + 10}px`)
+                        .style("top", `${event.pageY - 28}px`);
+                })
+                .on("mouseout", (event) => {
+                    d3.select(event.currentTarget).style("opacity", 0.9).style("stroke-width", "2px");
+                    tooltip.style("opacity", 0);
+                });
+                
+            // Add Labels
+            svg.selectAll("text")
+                .data(pie(workModeCounts))
+                .join("text")
+                .attr("transform", d => {
+                    // Position label near the arc centroid
+                    const pos = outerArc.centroid(d);
+                    return `translate(${pos})`;
+                })
+                .attr("dy", ".35em")
+                .style("text-anchor", d => {
+                    // Align text based on slice position
+                    return (d.endAngle + d.startAngle) / 2 > Math.PI ? "end" : "start";
+                })
+                .text(d => `${d.data.workMode} (${(d.data.count / totalEmployees * 100).toFixed(0)}%)`)
+                .style("fill", 'var(--primary-text-color)')
+                .style("font-size", "0.8rem");
+                
+            return () => { container.select("svg").remove(); };
+        }
+
+        // Slide 5: New Joiners Per Month (Line Chart)
+        function drawNewJoiners2D(container, data) {
+            const monthlyCounts = d3.rollup(data, v => v.length, 
+                d => d3.timeFormat("%Y-%m")(d.JoinDate) 
+            );
+
+            const sortedMonths = Array.from(monthlyCounts.keys()).sort();
+            const monthlyData = sortedMonths.map(month => ({
+                month: new Date(month + "-01"), // Convert to Date object for proper time scale
+                count: monthlyCounts.get(month)
+            }));
+            
+            const chartWrapper = container;
+            const margin = { top: 20, right: 20, bottom: 50, left: 50 };
+            const parentWidth = chartWrapper.node().getBoundingClientRect().width;
+            const parentHeight = chartWrapper.node().getBoundingClientRect().height;
+            const width = parentWidth - margin.left - margin.right;
+            const height = parentHeight - margin.top - margin.bottom;
+
+            if (width <= 0 || height <= 0) return () => {};
+            
+            chartWrapper.select("svg").remove();
+
+            const svg = chartWrapper.append("svg")
+                .attr("width", parentWidth)
+                .attr("height", parentHeight)
+                .attr("class", "chart-svg")
+                .append("g")
+                .attr("transform", `translate(${margin.left},${margin.top})`);
+            
+            const xDomain = d3.extent(monthlyData, d => d.month);
+            const yMax = d3.max(monthlyData, d => d.count);
+            
+            const xScale = d3.scaleTime()
+                .domain(xDomain)
+                .range([0, width]);
+
+            const yScale = d3.scaleLinear()
+                .domain([0, yMax + 2]) // Add padding
+                .range([height, 0]);
+
+            // Line Generator
+            const line = d3.line()
+                .x(d => xScale(d.month))
+                .y(d => yScale(d.count));
+
+            // Draw the line path
+            svg.append("path")
+                .datum(monthlyData)
+                .attr("fill", "none")
+                .attr("stroke", "var(--data-main)")
+                .attr("stroke-width", 3)
+                .attr("d", line);
+
+            // Draw data points (Circles)
+            svg.selectAll(".dot")
+                .data(monthlyData)
+                .join("circle")
+                .attr("class", "dot")
+                .attr("cx", d => xScale(d.month))
+                .attr("cy", d => yScale(d.count))
+                .attr("r", 5)
+                .attr("fill", d => d.count === 5 ? 'var(--negative-trend-color)' : 'var(--primary-text-color)') // Highlight the spike
+                .attr("stroke", 'var(--data-main)')
+                .attr("stroke-width", 1.5)
+                .on("mouseover", (event, d) => {
+                    tooltip.style("opacity", 1)
+                        .html(`<strong>${d3.timeFormat("%b %Y")(d.month)}</strong>: ${d.count} Joiners`)
+                        .style("left", `${event.pageX + 10}px`)
+                        .style("top", `${event.pageY - 28}px`);
+                })
+                .on("mousemove", (event) => {
+                    tooltip.style("left", `${event.pageX + 10}px`)
+                        .style("top", `${event.pageY - 28}px`);
+                })
+                .on("mouseout", () => {
+                    tooltip.style("opacity", 0);
+                });
+                
+
+            // Draw Axes
+            const xAxis = d3.axisBottom(xScale).tickFormat(d3.timeFormat("%b %y"));
+            const yAxis = d3.axisLeft(yScale).tickFormat(d3.format("d"));
+
+            svg.append("g")
+                .attr("class", "axis x-axis")
+                .attr("transform", `translate(0,${height})`)
+                .call(xAxis);
+
+            svg.append("g")
+                .attr("class", "axis y-axis")
+                .call(yAxis);
+            
+            return () => { chartWrapper.select("svg").remove(); };
+        }
+        
+        // Slide 6: Client & Project Manager Details Table (Sortable HTML Table)
+        function drawManagerDetailsTable(container, data) {
+            let currentSort = { key: 'ClientName', ascending: true };
+            // Clear previous content
+            container.html('');
+            
+            const tableContainer = container.append('div').attr('class', 'table-container');
+
+            const table = tableContainer.append('table');
+            
+            const headers = ['ClientName', 'ProjectManager', 'Dept', 'ClientSince', 'ContractValue', 'Status'];
+            const headerLabels = {
+                ClientName: "Client Name", 
+                ProjectManager: "Project Manager", 
+                Dept: "Department", 
+                ClientSince: "Client Since (Year)", 
+                ContractValue: "Contract Value", 
+                Status: "Status" 
+            };
+
+            const thead = table.append('thead');
+            const tbody = table.append('tbody');
+            
+            let sortableData = [...data];
+
+            function renderTable() {
+                // 1. Sort the data
+                sortableData.sort((a, b) => {
+                    let valA = a[currentSort.key]; let valB = b[currentSort.key];
+                    if (currentSort.key === 'ContractValue' || currentSort.key === 'ClientSince') { 
+                        valA = +valA; valB = +valB; 
+                    } else if (typeof valA === 'string') {
+                        valA = valA.toLowerCase(); 
+                        valB = valB.toLowerCase();
+                    }
+                    
+                    if (valA < valB) return currentSort.ascending ? -1 : 1;
+                    if (valA > valB) return currentSort.ascending ? 1 : -1;
+                    return 0;
+                });
+
+                // 2. Render Table Header (and add sort indicator)
+                thead.html('').append('tr').selectAll('th').data(headers).join('th')
+                    .html(d => {
+                        let arrow = '';
+                        if (currentSort.key === d) {
+                            arrow = currentSort.ascending ? ' ↓' : ' ↑'; 
+                        }
+                        return headerLabels[d] + arrow;
+                    })
+                    .on('click', (event, d) => {
+                        if (currentSort.key === d) {
+                            currentSort.ascending = !currentSort.ascending;
+                        } else {
+                            currentSort.key = d;
+                            currentSort.ascending = true;
+                        }
+                        renderTable();
+                    });
+
+                // 3. Render Table Body
+                const rows = tbody.selectAll('tr').data(sortableData, d => d.ClientID);
+
+                rows.exit().remove();
+
+                rows.join(
+                    enter => enter.append('tr')
+                        .attr('class', d => `status-${d.Status.toLowerCase().replace(/\s/g, '-')}`)
+                        .call(row => row.selectAll('td').data(d => {
+                            return headers.map(header => {
+                                if (header === 'ContractValue') return d3.format("$,.0f")(d[header]); // Format as currency
+                                return d[header];
+                            });
+                        }).join('td').text(d => d))
+                    ,
+                    update => update
+                        .attr('class', d => `status-${d.Status.toLowerCase().replace(/\s/g, '-')}`)
+                        .call(row => row.selectAll('td').data(d => {
+                            return headers.map(header => {
+                                if (header === 'ContractValue') return d3.format("$,.0f")(d[header]);
+                                return d[header];
+                            });
+                        }).join('td').text(d => d))
+                );
+            }
+
+            renderTable(); 
+            return () => { container.html(''); };
+        }
+
+
+        function initializeDashboard() {
+            storyScroller.selectAll('.story-slide')
+                .data(storySteps)
+                .join('div')
+                .attr('class', 'story-slide')
+                .attr('id', d => `slide-${d.id}`)
+                .html(d => `
+                    <div class="explanation-panel">
+                        <h2 class="story-title"></h2>
+                        <p class="story-text"></p>
+                    </div>
+                    <div class="chart-container">
+                        <!-- Content will be injected by updateSlideContent -->
+                    </div>
+                `);
+
+            navDotsContainer.selectAll('.nav-dot')
+                .data(storySteps)
+                .join('div')
+                .attr('class', 'nav-dot')
+                .on('click', (event, d) => {
+                    const index = storySteps.findIndex(step => step.id === d.id);
+                    scrollToSlide(index);
+                });
+            
+            let scrollTimeout;
+            storyScroller.on('scroll', () => {
+                clearTimeout(scrollTimeout);
+                scrollTimeout = setTimeout(() => {
+                    const scrollerNode = storyScroller.node();
+                    const slideWidth = scrollerNode.getBoundingClientRect().width;
+                    const newIndex = Math.round(scrollerNode.scrollLeft / slideWidth);
+                    
+                    if (newIndex !== currentStepIndex) {
+                        updateActiveState(newIndex);
+                    }
+                }, 150); 
+            });
+            
+            // Handle window resize for responsiveness
+            window.addEventListener('resize', () => {
+                 // Re-draw the current slide to recalculate dimensions
+                 updateActiveState(currentStepIndex);
+            });
+
+            // Initial load
+            updateActiveState(0);
+        }
+
+        initializeDashboard();
+    });
+    </script>
+</body>
+</html>
